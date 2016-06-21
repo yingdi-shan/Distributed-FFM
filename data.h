@@ -43,7 +43,6 @@ template <>
 class svec_t<vector<double>> : public unordered_map<int, vector<double>> {
 public:
 	string serialize() const {
-		printf("Entering special serialize.\n");
 		stringstream ss;
 		for (auto pair:*this) {
 			ss << pair.first << ":";
@@ -56,7 +55,6 @@ public:
 			ss<<" ";
 		}
 		ss.flush();
-		printf("Finish serialize.\n");
 		return ss.str();
 
 	}

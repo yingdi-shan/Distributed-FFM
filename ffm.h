@@ -40,9 +40,9 @@ public:
 	double f(svec_t<double> *input) {
 		double res = w[0];
 		for (auto pair:*input)
-			res += w[pair.first] * pair.second;
+			res += w[pair.first + 1] * pair.second;
 
-		/*
+
 		for (int k = 0; k < parameter.num_factors; k++) {
 			double first = 0;
 			for (auto pair:*input)
@@ -53,7 +53,7 @@ public:
 				sec += v[pair.first][k] * pair.second * v[pair.first][k] * pair.second;
 			res += first * first- sec;
 		}
-		 */
+
 
 		//	printf("%lf\n",res);
 
@@ -92,6 +92,8 @@ const int CANCELL_ID = 2;
 class FFMServer {
 public:
 	FFMModel model;
+	MPIConf conf;
+	int quited=0;
 
 	FFMModel pull(const vector<int> &keys) {
 		FFMModel result;
@@ -138,6 +140,8 @@ public:
 			else if (op == PUSH_ID)
 				serve_push(status.MPI_SOURCE);
 			else if (op == CANCELL_ID)
+				quited++;
+			if(quited >= conf.group_size -1)
 				break;
 		}
 	}
@@ -152,23 +156,23 @@ public:
 		int w_size;
 		int v_size;
 
-		MPI_Irecv(&w_size, 1, MPI_INT32_T, source, MPI_SEND_PUSH_W_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(&w_size, 1, MPI_INT32_T, source, MPI_SEND_PUSH_W_BEGIN, MPI_COMM_WORLD, NULL);
+
 
 		w = new char[w_size];
-		MPI_Irecv(w, w_size, MPI_CHAR, source, MPI_SEND_PUSH_W, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(w, w_size, MPI_CHAR, source, MPI_SEND_PUSH_W, MPI_COMM_WORLD, NULL);
+
 		assert(w[w_size-1] == 0);
 		string w_str(w);
 		svec_t<double> w_vec = deserialize(w);
 
 
-		MPI_Irecv(&v_size, 1, MPI_INT32_T, source, MPI_SEND_PUSH_V_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(&v_size, 1, MPI_INT32_T, source, MPI_SEND_PUSH_V_BEGIN, MPI_COMM_WORLD, NULL);
+
 
 		v = new char[v_size];
-		MPI_Irecv(v, v_size, MPI_CHAR, source, MPI_SEND_PUSH_V, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(v, v_size, MPI_CHAR, source, MPI_SEND_PUSH_V, MPI_COMM_WORLD, NULL);
+
 		assert(v[v_size-1] == 0);
 		string v_str(v);
 		svec_t<vector<double>> v_vec = deserialize_v(v_str);
@@ -182,12 +186,12 @@ public:
 		MPI_Status status;
 		int size;
 
-		MPI_Irecv(&size, 1, MPI_INT32_T, source, MPI_SEND_PULL_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(&size, 1, MPI_INT32_T, source, MPI_SEND_PULL_BEGIN, MPI_COMM_WORLD, NULL);
+
 
 		vector<int> keys(size);
-		MPI_Irecv(&keys[0], size, MPI_INT32_T, source, MPI_SEND_PULL, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(&keys[0], size, MPI_INT32_T, source, MPI_SEND_PULL, MPI_COMM_WORLD, NULL);
+
 
 		int w_size;
 		int v_size;
@@ -195,17 +199,16 @@ public:
 		string w_str = pull_model.w.serialize();
 		w_size = w_str.size() + 1;
 
-		MPI_Isend(&w_size, 1, MPI_INT32_T, source, MPI_SEND_PULL_CBK_W_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Isend(w_str.c_str(), w_size, MPI_CHAR, source, MPI_SEND_PULL_CBK_W, MPI_COMM_WORLD, &request);
+		MPI_Send(&w_size, 1, MPI_INT32_T, source, MPI_SEND_PULL_CBK_W_BEGIN, MPI_COMM_WORLD);
+		MPI_Send(w_str.c_str(), w_size, MPI_CHAR, source, MPI_SEND_PULL_CBK_W, MPI_COMM_WORLD);
 
-		printf("Begin to serialize v.\n");
 		string v_str = pull_model.v.serialize();
 		v_size = v_str.size() + 1;
 
-		MPI_Isend(&v_size, 1, MPI_INT32_T, source, MPI_SEND_PULL_CBK_V_BEGIN, MPI_COMM_WORLD, &request);
+		MPI_Send(&v_size, 1, MPI_INT32_T, source, MPI_SEND_PULL_CBK_V_BEGIN, MPI_COMM_WORLD);
 
 
-		MPI_Isend(v_str.c_str(), v_size, MPI_CHAR, source, MPI_SEND_PULL_CBK_V, MPI_COMM_WORLD, &request);
+		MPI_Send(v_str.c_str(), v_size, MPI_CHAR, source, MPI_SEND_PULL_CBK_V, MPI_COMM_WORLD);
 
 	}
 
@@ -241,37 +244,37 @@ public:
 		for (auto k:keys)
 			*ptr++ = k;
 
-		cout << "My rank:" << conf.rank << " Begin to pull" << endl;
+		//cout << "My rank:" << conf.rank << " Begin to pull" << endl;
 		MPI_Request request;
 		MPI_Status status;
 		int size = keys.size();
-		MPI_Isend(&size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Isend(key, size, MPI_INT32_T, 0, MPI_SEND_PULL, MPI_COMM_WORLD, &request);
+		MPI_Send(&size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_BEGIN, MPI_COMM_WORLD);
+		MPI_Send(key, size, MPI_INT32_T, 0, MPI_SEND_PULL, MPI_COMM_WORLD);
 		int w_size;
 		int v_size;
 
-		MPI_Irecv(&w_size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_CBK_W_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
-		cout << "My rank:" << conf.rank << " Received pull size " << w_size << endl;
+		MPI_Recv(&w_size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_CBK_W_BEGIN, MPI_COMM_WORLD, NULL);
+
+		//cout << "My rank:" << conf.rank << " Received pull size " << w_size << endl;
 		char *w = new char[w_size + 1];
-		MPI_Irecv(w, w_size, MPI_CHAR, 0, MPI_SEND_PULL_CBK_W, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(w, w_size, MPI_CHAR, 0, MPI_SEND_PULL_CBK_W, MPI_COMM_WORLD, NULL);
+
 		assert(w[w_size-1] == 0);
-		cout << "My rank:" << conf.rank << " Received w " << endl;
+		//cout << "My rank:" << conf.rank << " Received w " << endl;
 		string w_str(w);
 		result.w = deserialize(w_str);
 
-		MPI_Irecv(&v_size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_CBK_V_BEGIN, MPI_COMM_WORLD, &request);
+		MPI_Recv(&v_size, 1, MPI_INT32_T, 0, MPI_SEND_PULL_CBK_V_BEGIN, MPI_COMM_WORLD, NULL);
 
-		MPI_Wait(&request, &status);
+
 		char *v = new char[v_size + 1];
-		MPI_Irecv(v, v_size, MPI_CHAR, 0, MPI_SEND_PULL_CBK_V, MPI_COMM_WORLD, &request);
-		MPI_Wait(&request, &status);
+		MPI_Recv(v, v_size, MPI_CHAR, 0, MPI_SEND_PULL_CBK_V, MPI_COMM_WORLD, NULL);
+
 		assert(v[v_size-1]==0);
-		cout << "My rank:" << conf.rank << " Received v " << endl;
+		//cout << "My rank:" << conf.rank << " Received v " << endl;
 		string v_str(v);
 		result.v = deserialize_v(v_str);
-		cout << "My rank:" << conf.rank << " Finish pull" << endl;
+		//cout << "My rank:" << conf.rank << " Finish pull" << endl;
 		return result;
 	}
 
@@ -289,13 +292,12 @@ public:
 		int w_size = w_str.size() + 1;
 		int v_size = v_str.size() + 1;
 
-		MPI_ISend(&w_size, 1, MPI_INT32_T, 0, MPI_SEND_PUSH_W_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Isend(w_str.c_str(), w_size, MPI_CHAR, 0, MPI_SEND_PUSH_W, MPI_COMM_WORLD, &request);
+		MPI_Send(&w_size, 1, MPI_INT32_T, 0, MPI_SEND_PUSH_W_BEGIN, MPI_COMM_WORLD);
+		MPI_Send(w_str.c_str(), w_size, MPI_CHAR, 0, MPI_SEND_PUSH_W, MPI_COMM_WORLD);
 
-		MPI_Isend(&v_size, 1, MPI_INT32_T, 0, MPI_SEND_PUSH_V_BEGIN, MPI_COMM_WORLD, &request);
-		MPI_Isend(v_str.c_str(), v_size, MPI_CHAR, 0, MPI_SEND_PUSH_V, MPI_COMM_WORLD, &request);
+		MPI_Send(&v_size, 1, MPI_INT32_T, 0, MPI_SEND_PUSH_V_BEGIN, MPI_COMM_WORLD);
+		MPI_Send(v_str.c_str(), v_size, MPI_CHAR, 0, MPI_SEND_PUSH_V, MPI_COMM_WORLD);
 
-		MPI_Wait(&request,&status);
 
 	}
 
@@ -449,6 +451,7 @@ public:
 
 	void server_serve() {
 		FFMServer server;
+		server.conf = conf;
 		server.model.parameter = parameter;
 		server.serve();
 	}
